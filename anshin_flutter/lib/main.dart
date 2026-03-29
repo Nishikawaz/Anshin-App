@@ -2098,7 +2098,7 @@ class AnshinState extends ChangeNotifier {
       a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-class VoiceCaptureIndicator extends StatelessWidget {
+class VoiceCaptureIndicator extends StatefulWidget {
   const VoiceCaptureIndicator({
     super.key,
     required this.isStarting,
@@ -2113,56 +2113,113 @@ class VoiceCaptureIndicator extends StatelessWidget {
   final VoidCallback onStop;
 
   @override
+  State<VoiceCaptureIndicator> createState() => _VoiceCaptureIndicatorState();
+}
+
+class _VoiceCaptureIndicatorState extends State<VoiceCaptureIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  bool get _isActive => widget.isStarting || widget.isListening;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 760),
+    );
+    _pulseAnimation = Tween<double>(begin: 0.88, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+    if (_isActive) {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant VoiceCaptureIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isActive && !_pulseController.isAnimating) {
+      _pulseController.repeat(reverse: true);
+      return;
+    }
+    if (!_isActive && _pulseController.isAnimating) {
+      _pulseController.stop();
+      _pulseController.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!isStarting && !isListening && transcript.trim().isEmpty) {
+    if (!_isActive && widget.transcript.trim().isEmpty) {
       return const SizedBox.shrink();
     }
 
     final scheme = Theme.of(context).colorScheme;
-    final hasTranscript = transcript.trim().isNotEmpty;
+    final hasTranscript = widget.transcript.trim().isNotEmpty;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isListening
+        color: widget.isListening
             ? scheme.errorContainer.withValues(alpha: 0.35)
             : scheme.primaryContainer.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isListening ? scheme.error : scheme.primary),
+        border: Border.all(
+          color: widget.isListening ? scheme.error : scheme.primary,
+          width: 1.2,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              SizedBox(
-                width: 22,
-                height: 22,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (isListening || isStarting)
-                      CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: isListening ? scheme.error : scheme.primary,
+              ScaleTransition(
+                scale: _isActive
+                    ? _pulseAnimation
+                    : const AlwaysStoppedAnimation<double>(1),
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (_isActive)
+                        CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: widget.isListening
+                              ? scheme.error
+                              : scheme.primary,
+                        ),
+                      Icon(
+                        _isActive
+                            ? Icons.mic_rounded
+                            : Icons.check_circle_rounded,
+                        color: widget.isListening
+                            ? scheme.error
+                            : scheme.primary,
+                        size: 18,
                       ),
-                    Icon(
-                      isStarting || isListening
-                          ? Icons.mic_rounded
-                          : Icons.check_circle_rounded,
-                      color: isListening ? scheme.error : scheme.primary,
-                      size: 16,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isStarting
+                  widget.isStarting
                       ? 'Iniciando micrófono...'
-                      : (isListening
+                      : (widget.isListening
                             ? 'Grabando gasto por voz...'
                             : 'Voz detectada'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -2170,9 +2227,9 @@ class VoiceCaptureIndicator extends StatelessWidget {
                   ),
                 ),
               ),
-              if (isListening || isStarting)
+              if (_isActive)
                 TextButton.icon(
-                  onPressed: onStop,
+                  onPressed: widget.onStop,
                   icon: const Icon(Icons.stop_circle_outlined),
                   label: const Text('Detener'),
                 ),
@@ -2181,11 +2238,11 @@ class VoiceCaptureIndicator extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             hasTranscript
-                ? '“${transcript.trim()}”'
+                ? '“${widget.transcript.trim()}”'
                 : 'Habla ahora, por ejemplo: gaste 45.000 en supermercado.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          if (isListening || isStarting) ...[
+          if (_isActive) ...[
             const SizedBox(height: 8),
             const LinearProgressIndicator(minHeight: 4),
           ],
@@ -2237,6 +2294,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final cardTitle = state.formatPyg(state.availableTodayPyg);
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showVoiceOverlay =
+        state.isStartingVoice ||
+        state.isListeningVoice ||
+        state.liveVoiceText.trim().isNotEmpty;
 
     return Stack(
       children: [
@@ -2268,6 +2329,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
         ),
+        if (showVoiceOverlay)
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 18,
+            child: SafeArea(
+              top: false,
+              child: Material(
+                color: Colors.transparent,
+                elevation: 8,
+                borderRadius: BorderRadius.circular(14),
+                child: VoiceCaptureIndicator(
+                  isStarting: state.isStartingVoice,
+                  isListening: state.isListeningVoice,
+                  transcript: state.liveVoiceText,
+                  onStop: () => state.toggleVoiceCapture(),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -2368,27 +2449,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
               FilledButton.tonalIcon(
                 onPressed: state.toggleVoiceCapture,
                 icon: Icon(
-                  state.isListeningVoice
+                  state.isListeningVoice || state.isStartingVoice
                       ? Icons.mic_off_rounded
                       : Icons.keyboard_voice_rounded,
                 ),
                 label: Text(
-                  state.isListeningVoice ? 'Detener voz' : 'Escuchar gasto',
+                  state.isListeningVoice || state.isStartingVoice
+                      ? 'Detener voz'
+                      : 'Escuchar gasto',
                 ),
               ),
             ],
           ),
-          if (state.isStartingVoice ||
-              state.isListeningVoice ||
-              state.liveVoiceText.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            VoiceCaptureIndicator(
-              isStarting: state.isStartingVoice,
-              isListening: state.isListeningVoice,
-              transcript: state.liveVoiceText,
-              onStop: () => state.toggleVoiceCapture(),
-            ),
-          ],
         ],
       ),
     );
@@ -2538,7 +2610,9 @@ class TransactionsScreen extends StatelessWidget {
               FilledButton.tonal(
                 onPressed: state.toggleVoiceCapture,
                 child: Text(
-                  state.isListeningVoice ? 'Detener voz' : 'Escuchar gasto',
+                  state.isListeningVoice || state.isStartingVoice
+                      ? 'Detener voz'
+                      : 'Escuchar gasto',
                 ),
               ),
               FilledButton.tonal(
