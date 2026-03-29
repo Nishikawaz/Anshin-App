@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+run_dart() {
+  if command -v dart >/dev/null 2>&1; then
+    dart "$@"
+    return
+  fi
+  if command -v puro >/dev/null 2>&1; then
+    puro dart "$@"
+    return
+  fi
+  echo "pre-commit: dart or puro not found in PATH."
+  exit 1
+}
+
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+echo "pre-commit: checking staged content..."
+
+if ! git diff --cached --check; then
+  echo "pre-commit: whitespace errors found."
+  exit 1
+fi
+
+STAGED_DART_FILES="$(git diff --cached --name-only --diff-filter=ACMR -- '*.dart')"
+if [ -n "$STAGED_DART_FILES" ]; then
+  echo "pre-commit: verifying dart format..."
+  # shellcheck disable=SC2086
+  run_dart format --set-exit-if-changed $STAGED_DART_FILES
+fi
+
+if echo "$STAGED_FILES" | grep -Eq '(^|/)(pubspec\.yaml|analysis_options\.yaml|.*\.dart)$'; then
+  echo "pre-commit: running dart analyze..."
+  run_dart analyze
+fi
+
+ADDED_LINES="$(git diff --cached -U0)"
+if echo "$ADDED_LINES" | grep -Ei '^\+.*(print\(|debugPrint\(|Log\.)' | grep -Ei '(password|token|api[_-]?key|secret|saldo|monto|account|balance)' >/dev/null; then
+  echo "pre-commit: sensitive logging pattern detected in staged changes."
+  echo "Remove sensitive values from logs before committing."
+  exit 1
+fi
+
+echo "pre-commit: ok."
+

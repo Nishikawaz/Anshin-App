@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+run_flutter() {
+  if command -v flutter >/dev/null 2>&1; then
+    flutter "$@"
+    return
+  fi
+  if command -v puro >/dev/null 2>&1; then
+    puro flutter "$@"
+    return
+  fi
+  echo "pre-push: flutter or puro not found in PATH."
+  exit 1
+}
+
+echo "pre-push: running flutter analyze..."
+run_flutter analyze --no-pub
+
+echo "pre-push: running flutter test..."
+run_flutter test --no-pub
+
+echo "pre-push: ok."
+
