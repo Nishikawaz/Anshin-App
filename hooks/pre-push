@@ -1,0 +1,47 @@
+#!/bin/sh
+# Anshin — pre-push hook
+# Instalar: cp hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+echo "🚀 Anshin pre-push checks (rama: $BRANCH)..."
+
+# ── Bloquear push directo a main/master ───────────────────────────────────
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  echo "${RED}❌ Push directo a $BRANCH no permitido.${NC}"
+  echo "   Usá un PR desde una rama feature/fix."
+  exit 1
+fi
+
+# ── Correr unit tests antes de pushear ───────────────────────────────────
+echo "🧪 Corriendo unit tests..."
+if ! ./gradlew testDebugUnitTest --quiet 2>&1; then
+  echo "${RED}❌ Unit tests fallaron — corregí antes de pushear.${NC}"
+  exit 1
+fi
+echo "${GREEN}✅ Tests OK${NC}"
+
+# ── Verificar que no hay TODO/FIXME en archivos staged ───────────────────
+TODO_COUNT=$(git diff origin/"$BRANCH"..."$BRANCH" --name-only 2>/dev/null | \
+  grep "\.kt$" | xargs grep -c "// TODO\|// FIXME" 2>/dev/null | \
+  awk -F: '{sum+=$2} END {print sum}' || echo 0)
+
+if [ "$TODO_COUNT" -gt 5 ]; then
+  echo "${YELLOW}⚠️  $TODO_COUNT TODOs/FIXMEs en el código — considerá resolverlos.${NC}"
+fi
+
+# ── Lint check ───────────────────────────────────────────────────────────
+echo "🔎 Corriendo lint..."
+if ! ./gradlew lintDebug --quiet 2>&1; then
+  echo "${YELLOW}⚠️  Lint reportó issues — revisá app/build/reports/lint-results-debug.html${NC}"
+fi
+
+echo "${GREEN}✅ Pre-push OK — pusheando $BRANCH...${NC}"
+exit 0

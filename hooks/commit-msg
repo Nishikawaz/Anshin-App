@@ -1,0 +1,30 @@
+#!/bin/sh
+# Anshin — commit-msg hook
+# Instalar: cp hooks/commit-msg .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg
+# Valida formato de Conventional Commits
+
+COMMIT_MSG=$(cat "$1")
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Prefijos permitidos
+PATTERN="^(feat|fix|refactor|test|docs|chore|perf|style|ci|revert)(\(.+\))?: .{3,}"
+
+if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+  echo "${RED}❌ Formato de commit inválido.${NC}"
+  echo ""
+  echo "   Formato correcto:  tipo(scope): descripción"
+  echo ""
+  echo "   Ejemplos válidos:"
+  echo "     feat(notification): add Continental bank parser"
+  echo "     fix(speech): handle empty SpeechRecognizer result"
+  echo "     test(parser): add Itaú parser unit tests"
+  echo "     chore(deps): bump Room to 2.6.1"
+  echo ""
+  echo "   Tipos permitidos: feat · fix · refactor · test · docs · chore · perf · style · ci · revert"
+  echo ""
+  echo "   Tu mensaje: \"$COMMIT_MSG\""
+  exit 1
+fi
+
+exit 0
