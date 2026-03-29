@@ -1000,6 +1000,11 @@ class AnshinState extends ChangeNotifier {
   DateTime? _lastPushAt;
   String? _lastPushMessage;
   String? _lastWeeklyReport;
+  String _voiceDraftTranscript = '';
+  String _voiceDraftMerchant = '';
+  String _voiceDraftCategory = 'Variables';
+  int _voiceDraftAmountPyg = 0;
+  bool _hasVoiceDraft = false;
 
   AnshinState();
 
@@ -1017,6 +1022,11 @@ class AnshinState extends ChangeNotifier {
   String get budgetPlanName => _budgetPlanName;
   BudgetSplit get budgetPlan => _budgetPlan;
   bool get hasUserBudgetConfig => _hasUserBudgetConfig;
+  bool get hasVoiceDraft => _hasVoiceDraft;
+  String get voiceDraftTranscript => _voiceDraftTranscript;
+  String get voiceDraftMerchant => _voiceDraftMerchant;
+  String get voiceDraftCategory => _voiceDraftCategory;
+  int get voiceDraftAmountPyg => _voiceDraftAmountPyg;
 
   int get totalExpensesPyg => _transactions
       .where((t) => t.isConfirmed && !t.isIncome)
@@ -1243,6 +1253,62 @@ class AnshinState extends ChangeNotifier {
     unawaited(_saveTransactionsToStorage());
     notifyListeners();
     return true;
+  }
+
+  void _setVoiceDraft({
+    required String transcript,
+    required String merchant,
+    required String category,
+    required int amountPyg,
+  }) {
+    _voiceDraftTranscript = transcript;
+    _voiceDraftMerchant = merchant;
+    _voiceDraftCategory = category;
+    _voiceDraftAmountPyg = amountPyg;
+    _hasVoiceDraft = true;
+  }
+
+  void _clearVoiceDraft({bool notify = false}) {
+    _voiceDraftTranscript = '';
+    _voiceDraftMerchant = '';
+    _voiceDraftCategory = 'Variables';
+    _voiceDraftAmountPyg = 0;
+    _hasVoiceDraft = false;
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  bool completeVoiceDraft({
+    required int amountPyg,
+    required String merchant,
+    required String category,
+  }) {
+    if (!_hasVoiceDraft || amountPyg <= 0 || merchant.trim().isEmpty) {
+      return false;
+    }
+    _addCapturedTransaction(
+      amountPyg: amountPyg,
+      merchant: merchant.trim(),
+      category: category,
+      source: TransactionSource.voice,
+      isIncome: false,
+      notify: false,
+    );
+    _clearVoiceDraft();
+    _integrationMessage =
+        'Voz completada: ${formatPyg(amountPyg)} en "${merchant.trim()}".';
+    notifyListeners();
+    return true;
+  }
+
+  void discardVoiceDraft() {
+    if (!_hasVoiceDraft) {
+      return;
+    }
+    _clearVoiceDraft();
+    _integrationMessage = 'Borrador de voz descartado.';
+    notifyListeners();
   }
 
   void _addCapturedTransaction({
@@ -1526,10 +1592,11 @@ class AnshinState extends ChangeNotifier {
               }
             }
           },
-          onError: (_) {
+          onError: (error) {
             _isListeningVoice = false;
             _voiceResultCommitted = true;
-            _integrationMessage = 'Error en reconocimiento de voz.';
+            _integrationMessage =
+                'Error en reconocimiento de voz: ${error.errorMsg}.';
             notifyListeners();
           },
         );
@@ -1916,18 +1983,26 @@ class AnshinState extends ChangeNotifier {
     _voiceResultCommitted = true;
     final normalized = transcript.trim();
     final amount = _parseAnyAmount(normalized);
-    if (amount <= 0) {
-      _integrationMessage =
-          'Voz recibida, pero sin monto claro. Ejemplo: "gaste 45.000 en supermercado".';
-      notifyListeners();
-      return;
-    }
-
     final merchant = _guessMerchantFromText(
       normalized,
       fallback: 'Gasto por voz',
     );
     final category = _guessCategory(normalized);
+
+    if (amount <= 0) {
+      _setVoiceDraft(
+        transcript: normalized,
+        merchant: merchant,
+        category: category,
+        amountPyg: 0,
+      );
+      _integrationMessage =
+          'Voz recibida, pero sin monto claro. Abrí "Movimientos" y tocá "Completar voz".';
+      notifyListeners();
+      return;
+    }
+
+    _clearVoiceDraft();
     _addCapturedTransaction(
       amountPyg: amount,
       merchant: merchant,
@@ -2008,6 +2083,97 @@ class AnshinState extends ChangeNotifier {
 
   bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+class VoiceCaptureIndicator extends StatelessWidget {
+  const VoiceCaptureIndicator({
+    super.key,
+    required this.isListening,
+    required this.transcript,
+    required this.onStop,
+  });
+
+  final bool isListening;
+  final String transcript;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isListening && transcript.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final scheme = Theme.of(context).colorScheme;
+    final hasTranscript = transcript.trim().isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isListening
+            ? scheme.errorContainer.withValues(alpha: 0.35)
+            : scheme.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isListening ? scheme.error : scheme.primary),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (isListening)
+                      CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: scheme.error,
+                      ),
+                    Icon(
+                      isListening
+                          ? Icons.mic_rounded
+                          : Icons.check_circle_rounded,
+                      color: isListening ? scheme.error : scheme.primary,
+                      size: 16,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isListening ? 'Grabando gasto por voz...' : 'Voz detectada',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (isListening)
+                TextButton.icon(
+                  onPressed: onStop,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('Detener'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hasTranscript
+                ? '“${transcript.trim()}”'
+                : 'Habla ahora, por ejemplo: gaste 45.000 en supermercado.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          if (isListening) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(minHeight: 4),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class DashboardScreen extends StatefulWidget {
@@ -2193,11 +2359,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
-          if (state.liveVoiceText.isNotEmpty) ...[
+          if (state.isListeningVoice ||
+              state.liveVoiceText.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              'Voz: ${state.liveVoiceText}',
-              style: Theme.of(context).textTheme.bodyMedium,
+            VoiceCaptureIndicator(
+              isListening: state.isListeningVoice,
+              transcript: state.liveVoiceText,
+              onStop: () => state.toggleVoiceCapture(),
             ),
           ],
         ],
@@ -2358,6 +2526,62 @@ class TransactionsScreen extends StatelessWidget {
               ),
             ],
           ),
+          if (state.isListeningVoice || state.liveVoiceText.trim().isNotEmpty)
+            const SizedBox(height: 10),
+          if (state.isListeningVoice || state.liveVoiceText.trim().isNotEmpty)
+            VoiceCaptureIndicator(
+              isListening: state.isListeningVoice,
+              transcript: state.liveVoiceText,
+              onStop: () => state.toggleVoiceCapture(),
+            ),
+          if (state.hasVoiceDraft) ...[
+            const SizedBox(height: 10),
+            Card(
+              color: Theme.of(
+                context,
+              ).colorScheme.errorContainer.withValues(alpha: 0.45),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Completar voz',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'No se pudo detectar el monto con precisión. Texto detectado:',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '“${state.voiceDraftTranscript}”',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: () =>
+                              _showVoiceRecoveryDialog(context, state),
+                          icon: const Icon(Icons.edit_note_rounded),
+                          label: const Text('Completar voz'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: state.discardVoiceDraft,
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          label: const Text('Descartar'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (pending.isNotEmpty) ...[
             const SizedBox(height: 18),
             Text('Pendientes', style: Theme.of(context).textTheme.titleLarge),
@@ -2481,6 +2705,124 @@ class TransactionsScreen extends StatelessWidget {
       case TransactionSource.voice:
         return 'Voz';
     }
+  }
+
+  Future<void> _showVoiceRecoveryDialog(
+    BuildContext context,
+    AnshinState state,
+  ) async {
+    final amountController = TextEditingController(
+      text: state.voiceDraftAmountPyg > 0
+          ? withThousandsDots('${state.voiceDraftAmountPyg}')
+          : '',
+    );
+    final merchantController = TextEditingController(
+      text: state.voiceDraftMerchant.isEmpty
+          ? 'Gasto por voz'
+          : state.voiceDraftMerchant,
+    );
+    var isFormattingAmount = false;
+    String category = state.voiceDraftCategory;
+
+    void onAmountChanged(String value) {
+      if (isFormattingAmount) {
+        return;
+      }
+      final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+      final formatted = withThousandsDots(digits);
+      if (formatted == amountController.text) {
+        return;
+      }
+      isFormattingAmount = true;
+      amountController.value = TextEditingValue(
+        text: formatted,
+        selection: TextSelection.collapsed(offset: formatted.length),
+      );
+      isFormattingAmount = false;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Completar movimiento por voz'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Texto detectado: "${state.voiceDraftTranscript}"',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    onChanged: onAmountChanged,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Monto PYG',
+                      hintText: 'Ej: 85.000',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: merchantController,
+                    decoration: const InputDecoration(labelText: 'Comercio'),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: category,
+                    items: const ['Fijos', 'Variables', 'Ahorro']
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value == null) {
+                        return;
+                      }
+                      setDialogState(() => category = value);
+                    },
+                    decoration: const InputDecoration(labelText: 'Categoria'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final amount = parsePygAmount(amountController.text);
+                    final merchant = merchantController.text.trim();
+                    final saved = state.completeVoiceDraft(
+                      amountPyg: amount,
+                      merchant: merchant,
+                      category: category,
+                    );
+                    if (!saved) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Revisá monto y comercio antes de guardar.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Guardar movimiento'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _showManualDialog(
