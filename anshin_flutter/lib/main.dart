@@ -2755,6 +2755,80 @@ class BudgetScreen extends StatelessWidget {
     return customPreset;
   }
 
+  Future<void> _showSalaryEditor(BuildContext context) async {
+    final salaryController = TextEditingController(
+      text: withThousandsDots('${state.monthlyIncomePyg}'),
+    );
+    var isFormattingSalary = false;
+
+    void onSalaryChanged(String value) {
+      if (isFormattingSalary) {
+        return;
+      }
+      final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+      final formatted = withThousandsDots(digits);
+      if (formatted == salaryController.text) {
+        return;
+      }
+      isFormattingSalary = true;
+      salaryController.value = TextEditingValue(
+        text: formatted,
+        selection: TextSelection.collapsed(offset: formatted.length),
+      );
+      isFormattingSalary = false;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Actualizar sueldo'),
+          content: TextField(
+            controller: salaryController,
+            keyboardType: TextInputType.number,
+            onChanged: onSalaryChanged,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+            decoration: const InputDecoration(
+              labelText: 'Sueldo mensual en PYG',
+              hintText: 'Ej: 5.000.000',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final salary = parsePygAmount(salaryController.text);
+                if (salary <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Ingresá un sueldo válido en PYG.'),
+                    ),
+                  );
+                  return;
+                }
+                state.configureBudgetPlan(
+                  salaryPyg: salary,
+                  plan: state.budgetPlan,
+                  planName: state.budgetPlanName,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Sueldo actualizado.')),
+                );
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _showTemplatePicker(BuildContext context) async {
     var selectedPreset = _presetForCurrentPlan();
     var customFixed = state.budgetPlan.fixedPct.toDouble();
@@ -2934,24 +3008,40 @@ class BudgetScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final budgets = state.budgets;
+    final variableBudget = budgets.firstWhere(
+      (budget) => budget.name == 'Variables',
+      orElse: () => BudgetCategory(name: 'Variables', limitPyg: 0, spentPyg: 0),
+    );
+
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(
-            'Presupuesto ${state.budgetPlan.fixedPct}/${state.budgetPlan.variablePct}/${state.budgetPlan.savingsPct}',
+            state.formatPyg(variableBudget.limitPyg),
             style: Theme.of(context).textTheme.displaySmall,
           ),
           const SizedBox(height: 8),
           Text(
-            '${state.budgetPlanName} • Alertas: ${AnshinState.alertThresholds.join(', ')}% • Moneda fija: PYG.',
+            'Tope mensual de Variables • ${state.budgetPlanName} (${state.budgetPlan.fixedPct}/${state.budgetPlan.variablePct}/${state.budgetPlan.savingsPct}) • Sueldo ${state.formatPyg(state.monthlyIncomePyg)} • Moneda fija: PYG.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 10),
-          FilledButton.tonalIcon(
-            onPressed: () => _showTemplatePicker(context),
-            icon: const Icon(Icons.tune_rounded),
-            label: const Text('Cambiar plantilla'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: () => _showTemplatePicker(context),
+                icon: const Icon(Icons.tune_rounded),
+                label: const Text('Cambiar plantilla'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => _showSalaryEditor(context),
+                icon: const Icon(Icons.payments_rounded),
+                label: const Text('Cambiar sueldo'),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           ...budgets.map((b) {
