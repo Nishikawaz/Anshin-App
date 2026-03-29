@@ -982,6 +982,7 @@ class AnshinState extends ChangeNotifier {
   bool _bankCaptureEnabled = false;
   bool _voiceAvailable = false;
   bool _isListeningVoice = false;
+  bool _isStartingVoice = false;
   bool _voiceResultCommitted = false;
   String? _preferredVoiceLocaleId;
   String _liveVoiceText = '';
@@ -1016,6 +1017,7 @@ class AnshinState extends ChangeNotifier {
   bool get bankCaptureEnabled => _bankCaptureEnabled;
   bool get voiceAvailable => _voiceAvailable;
   bool get isListeningVoice => _isListeningVoice;
+  bool get isStartingVoice => _isStartingVoice;
   String get liveVoiceText => _liveVoiceText;
   String get integrationMessage => _integrationMessage;
   int get monthlyIncomePyg => _monthlyIncomePyg;
@@ -1389,9 +1391,10 @@ class AnshinState extends ChangeNotifier {
   }
 
   Future<void> toggleVoiceCapture() async {
-    if (_isListeningVoice) {
+    if (_isListeningVoice || _isStartingVoice) {
       await _speech.stop();
       _isListeningVoice = false;
+      _isStartingVoice = false;
       if (!_voiceResultCommitted && _liveVoiceText.trim().isNotEmpty) {
         _commitVoiceCapture(_liveVoiceText);
         return;
@@ -1410,7 +1413,8 @@ class AnshinState extends ChangeNotifier {
     }
     _liveVoiceText = '';
     _voiceResultCommitted = false;
-    _integrationMessage = 'Escuchando gasto por voz...';
+    _integrationMessage = 'Iniciando micrófono...';
+    _isStartingVoice = true;
     _isListeningVoice = true;
     notifyListeners();
 
@@ -1437,6 +1441,7 @@ class AnshinState extends ChangeNotifier {
           pauseFor: const Duration(seconds: 5),
         );
       } catch (_) {
+        _isStartingVoice = false;
         _isListeningVoice = false;
         _integrationMessage =
             'No pude iniciar el microfono. Revisá permisos de voz.';
@@ -1581,9 +1586,16 @@ class AnshinState extends ChangeNotifier {
       try {
         _voiceAvailable = await _speech.initialize(
           onStatus: (status) {
+            if (status == 'listening') {
+              _isStartingVoice = false;
+              _integrationMessage = 'Escuchando gasto por voz...';
+              notifyListeners();
+              return;
+            }
             if (status == 'notListening') {
               final shouldCommit =
                   !_voiceResultCommitted && _liveVoiceText.trim().isNotEmpty;
+              _isStartingVoice = false;
               _isListeningVoice = false;
               if (shouldCommit) {
                 _commitVoiceCapture(_liveVoiceText);
@@ -1593,6 +1605,7 @@ class AnshinState extends ChangeNotifier {
             }
           },
           onError: (error) {
+            _isStartingVoice = false;
             _isListeningVoice = false;
             _voiceResultCommitted = true;
             _integrationMessage =
@@ -2088,18 +2101,20 @@ class AnshinState extends ChangeNotifier {
 class VoiceCaptureIndicator extends StatelessWidget {
   const VoiceCaptureIndicator({
     super.key,
+    required this.isStarting,
     required this.isListening,
     required this.transcript,
     required this.onStop,
   });
 
+  final bool isStarting;
   final bool isListening;
   final String transcript;
   final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
-    if (!isListening && transcript.trim().isEmpty) {
+    if (!isStarting && !isListening && transcript.trim().isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -2127,13 +2142,13 @@ class VoiceCaptureIndicator extends StatelessWidget {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    if (isListening)
+                    if (isListening || isStarting)
                       CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: scheme.error,
+                        color: isListening ? scheme.error : scheme.primary,
                       ),
                     Icon(
-                      isListening
+                      isStarting || isListening
                           ? Icons.mic_rounded
                           : Icons.check_circle_rounded,
                       color: isListening ? scheme.error : scheme.primary,
@@ -2145,13 +2160,17 @@ class VoiceCaptureIndicator extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isListening ? 'Grabando gasto por voz...' : 'Voz detectada',
+                  isStarting
+                      ? 'Iniciando micrófono...'
+                      : (isListening
+                            ? 'Grabando gasto por voz...'
+                            : 'Voz detectada'),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              if (isListening)
+              if (isListening || isStarting)
                 TextButton.icon(
                   onPressed: onStop,
                   icon: const Icon(Icons.stop_circle_outlined),
@@ -2166,7 +2185,7 @@ class VoiceCaptureIndicator extends StatelessWidget {
                 : 'Habla ahora, por ejemplo: gaste 45.000 en supermercado.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          if (isListening) ...[
+          if (isListening || isStarting) ...[
             const SizedBox(height: 8),
             const LinearProgressIndicator(minHeight: 4),
           ],
@@ -2359,10 +2378,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
-          if (state.isListeningVoice ||
+          if (state.isStartingVoice ||
+              state.isListeningVoice ||
               state.liveVoiceText.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
             VoiceCaptureIndicator(
+              isStarting: state.isStartingVoice,
               isListening: state.isListeningVoice,
               transcript: state.liveVoiceText,
               onStop: () => state.toggleVoiceCapture(),
@@ -2526,10 +2547,15 @@ class TransactionsScreen extends StatelessWidget {
               ),
             ],
           ),
-          if (state.isListeningVoice || state.liveVoiceText.trim().isNotEmpty)
+          if (state.isStartingVoice ||
+              state.isListeningVoice ||
+              state.liveVoiceText.trim().isNotEmpty)
             const SizedBox(height: 10),
-          if (state.isListeningVoice || state.liveVoiceText.trim().isNotEmpty)
+          if (state.isStartingVoice ||
+              state.isListeningVoice ||
+              state.liveVoiceText.trim().isNotEmpty)
             VoiceCaptureIndicator(
+              isStarting: state.isStartingVoice,
               isListening: state.isListeningVoice,
               transcript: state.liveVoiceText,
               onStop: () => state.toggleVoiceCapture(),
