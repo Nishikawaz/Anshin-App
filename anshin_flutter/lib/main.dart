@@ -1326,9 +1326,16 @@ class AnshinState extends ChangeNotifier {
     if (_isListeningVoice) {
       await _speech.stop();
       _isListeningVoice = false;
-      _integrationMessage = 'Dictado detenido.';
+      if (!_voiceResultCommitted && _liveVoiceText.trim().isNotEmpty) {
+        _commitVoiceCapture(_liveVoiceText);
+        return;
+      }
+      _integrationMessage = 'Dictado detenido sin texto detectable.';
       notifyListeners();
       return;
+    }
+    if (!_voiceAvailable) {
+      await _initVoice();
     }
     if (!_voiceAvailable) {
       _integrationMessage = 'Voz no disponible o sin permisos.';
@@ -1349,8 +1356,8 @@ class AnshinState extends ChangeNotifier {
           partialResults: true,
           cancelOnError: true,
         ),
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 35),
+        pauseFor: const Duration(seconds: 5),
       );
     } catch (_) {
       try {
@@ -1360,8 +1367,8 @@ class AnshinState extends ChangeNotifier {
             partialResults: true,
             cancelOnError: true,
           ),
-          listenFor: const Duration(seconds: 20),
-          pauseFor: const Duration(seconds: 3),
+          listenFor: const Duration(seconds: 35),
+          pauseFor: const Duration(seconds: 5),
         );
       } catch (_) {
         _isListeningVoice = false;
@@ -1510,9 +1517,7 @@ class AnshinState extends ChangeNotifier {
           onStatus: (status) {
             if (status == 'notListening') {
               final shouldCommit =
-                  _isListeningVoice &&
-                  !_voiceResultCommitted &&
-                  _liveVoiceText.trim().isNotEmpty;
+                  !_voiceResultCommitted && _liveVoiceText.trim().isNotEmpty;
               _isListeningVoice = false;
               if (shouldCommit) {
                 _commitVoiceCapture(_liveVoiceText);
