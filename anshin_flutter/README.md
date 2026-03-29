@@ -1,17 +1,40 @@
-# anshin_flutter
+# Anshin Flutter
 
-A new Flutter project.
+App de finanzas personales de Anshin construida con Flutter.
 
-## Getting Started
+## Requisitos
 
-This project is a starting point for a Flutter application.
+- Flutter SDK instalado (`flutter --version`)
+- Android Studio + Android SDK
+- dispositivo físico (USB) o emulador Android
+- cuenta Firebase configurada para Google Sign-In (Android)
 
-A few resources to get you started if this is your first Flutter project:
+## Configuración
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+1. Instalar dependencias:
+   - `flutter pub get`
+2. Crear/descargar `google-services.json` de Firebase.
+3. Copiar archivo a:
+   - `android/app/google-services.json`
+4. (Opcional) instalar hooks de git:
+   - PowerShell: `./hooks/setup-hooks.ps1`
+   - Bash: `./hooks/setup-hooks.sh`
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Ejecutar
+
+- `flutter run`
+
+Si hay varios dispositivos:
+
+- `flutter devices`
+- `flutter run -d <device_id>`
+
+## Build de release (Android)
+
+- `flutter build apk --release`
+
+## Documentación útil
+
+- `GOOGLE_SIGNIN_SETUP.md`: pasos de Firebase y SHA
+- `PROJECT.md`: alcance funcional actual
+- `docs/`: changelog, release notes y checklist de arquitectura
